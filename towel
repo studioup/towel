@@ -1,0 +1,322 @@
+#!/bin/bash -e
+#credits http://www.ltconsulting.co.uk/automated-wordpress-installation-with-bash-wp-cli/
+clear
+
+PKG_OK=$(dpkg-query -W --showformat='${Status}\n' makepasswd|grep "install ok installed")
+#echo Checking for makepasswd: $PKG_OK
+if [ "" == "$PKG_OK" ]; then
+    echo "Missing makepasswd. I will install it"
+    sudo apt-get --force-yes --yes install makepasswd
+else
+    echo "makepasswd exists if it need to bee upgraded you can do it manually"
+fi
+
+if hash wp 2>/dev/null; then
+    echo "wp-cli exists if it need to bee upgraded you can do it manually"
+else
+    echo "Missing wp-cli. I will install it"
+    curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+    chmod +x wp-cli.phar
+    sudo mv wp-cli.phar /usr/local/bin/wp
+fi
+
+
+
+MYSQL=`which mysql`
+BTICK='`'
+PASSW=`makepasswd --chars 16`
+WPPASSW=`makepasswd --chars 16`
+WPUSER=admin
+WPMAIL=mail@example.com
+RANDDBUSER=`makepasswd --chars 4`
+RANDDBNAME=`makepasswd --chars 4`
+BASEDOMAIN=.studioup.it
+SERVERIP=`ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1'`
+
+
+echo "================================================================="
+echo "Studio Up WordPress Installer!!"
+echo "================================================================="
+
+# accept the name of our website
+read -e -p "Site Name: " -i "" sitename
+
+# first, strip underscores
+CLEAN=${sitename//_/}
+# next, replace spaces with underscores
+CLEAN=${CLEAN// /_}
+# now, clean out anything that's not alphanumeric or an underscore
+CLEAN=${CLEAN//[^a-zA-Z0-9_]/}
+# finally, lowercase with TR
+CLEAN=`echo -n $CLEAN | tr A-Z a-z`
+
+# accept the name of folder
+read -e -p "Site folder: " -i "/var/www/${CLEAN}" sitefolder
+
+while true; do
+    if [ -d "$sitefolder" ]; then
+        
+        # Control will enter here if $DIRECTORY exists.
+        if [ "$(ls -A $sitefolder)" ]; then
+            read -e -p "*** DANGER *** ${sitefolder} exists and it's not empty, I will not delete any file but some could be overwritten, are you sure you want to proceed? (y/n): " -i "n" run
+            
+        else
+            read -e -p "*** WARNING *** ${sitefolder} exists and it's empty, it should be safe to proceed, do you agree? (y/n): " -i "y" run
+        fi
+        if [ "$run" == y ] ; then
+            break
+        else
+            read -e -p "Site folder: " -i "${sitefolder}" sitefolder
+            continue
+        fi
+    else
+        echo "Folder did not exist, I've just created it"
+        mkdir -p ${sitefolder}
+        break
+    fi
+done
+
+
+
+# accept the domain name
+read -e -p "Domain name: " -i "${CLEAN}${BASEDOMAIN}" domainname
+
+
+while true; do
+    if  grep --quiet -rl "${domainname}" /etc/nginx/sites-enabled/ ; then
+        NGINXCONF=`grep -rl "${domainname}" /etc/nginx/sites-enabled`
+        read -e -p "*** WARNING *** ${domainname} is already configured on this server, if you like you can check ${NGINXCONF}, would you like to proceed anyway? (y/n): " -i "y" run
+        if [ "$run" == y ] ; then
+            break
+        else
+            read -e -p "Domain name: " -i "${domainname}" domainname
+            continue
+        fi
+    else
+        break
+    fi
+    
+done
+
+if  grep --quiet -rl "${domainname}" /etc/nginx/sites-enabled/ ; then
+    read -e -p "*** WARNING *** ${domainname} is already configured on this server, would you like to configure Nignx anyway? (y/n): " -i "n" run
+else
+    read -e -p "Would you like to configure Nignx? (y/n): " -i "y" run
+fi
+
+if [ "$run" == y ] ; then
+    # accept the name of nginx conf
+    read -e -p "Nginx config file name (.conf extension is mandatory): " -i "${CLEAN}.conf" nignxconfname
+    
+    while true; do
+        
+        if [ -f "/etc/nginx/sites-enabled/${nignxconfname}" ]; then
+            
+            # Control will enter here if $DIRECTORY exists.
+            read -e -p "*** DANGER *** /etc/nginx/sites-enabled/${nignxconfname} exists, please change the name: " -i "${nignxconfname}" nignxconfname
+            continue
+    
+        else
+    
+cat >> /etc/nginx/sites-enabled/${nignxconfname} <<EOL
+    server {
+    	listen ${SERVERIP}:80;
+    	server_name   ${domainname};
+    	access_log    /var/log/${CLEAN}-access.log combined;
+    	error_log    /var/log/${CLEAN}-error.log error;
+    	root     ${sitefolder};
+    
+    	add_header "X-UA-Compatible" "IE=Edge,chrome=1";
+    
+        index index.php index.html index.htm;   
+        
+        include wp-multi.conf;
+    
+    }
+EOL
+            echo "Config file did not exist, I've just created it"
+            read -e -p "Would you like to reload nginx? (y/n): " -i "y" run
+            if [ "$run" == y ] ; then
+                service nginx configtest && sudo service nginx reload
+            fi
+            break
+        fi
+    done
+fi
+
+
+
+
+
+# accept user input for the database name
+dbuser=${CLEAN}-${RANDDBUSER}-user
+read -e -p "Database User (max 16 chars): " -i "${dbuser:0:16}" dbuser
+dbuser=${dbuser:0:16}
+
+# accept user input for the database name
+dbname=${CLEAN}-${RANDDBNAME}-db
+read -e -p "Database Name (max 16 chars): " -i "${dbname:0:16}" dbname
+dbname=${dbname:0:16}
+
+# accept user input for the databse name
+read -e -p "Database Password (autogenerated, max 16 chars): " -i "${PASSW}" dbpassw
+dbpassw=${dbpassw:0:16}
+
+# add a simple yes/no confirmation before we proceed
+read -e -p "Would you like to create the db? (y/n): " -i "y" createdb
+if [ "$createdb" == y ] ; then
+    Q1="CREATE DATABASE IF NOT EXISTS ${BTICK}${dbname}${BTICK};"
+    Q2="GRANT ALL ON ${BTICK}${dbname}${BTICK}.* TO '${dbuser}'@'localhost' IDENTIFIED BY '${dbpassw}';"
+    Q3="FLUSH PRIVILEGES;"
+    SQL="${Q1}${Q2}${Q3}"
+    echo "You will be asked for your MySql root password"
+    $MYSQL -uroot -p -e "$SQL"
+fi
+
+# accept a comma separated list of pages
+read -e -p "Add pages (comma separated): " -i "Home,News,Contacts" allpages
+
+
+# add a simple yes/no confirmation before we proceed
+read -e -p "Would you like to run the wordpress installation? (y/n): " -i "y" run
+
+# if the user didn't say no, then go ahead an install
+if [ "$run" != y ] ; then
+    exit
+else
+
+    # download the WordPress core files
+    cd ${sitefolder}
+    wp core download --locale=it_IT --allow-root
+    
+    # create the wp-config file with our standard setup
+    
+wp core config --dbname=${dbname} --dbuser=${dbuser} --dbpass=${dbpassw} --allow-root --extra-php <<PHP 
+define( 'WP_DEBUG', true );
+define( 'DISALLOW_FILE_EDIT', true );
+define('WP_HOME','http://${domainname}/');
+define('WP_SITEURL','http://${domainname}');
+if ( defined( 'WP_CLI' ) ) {
+    \$_SERVER['HTTP_HOST'] = \$_SERVER['SERVER_NAME'] = ''; // avoid wpml error message
+    \$_SERVER['SERVER_PORT'] = 80;
+}
+PHP
+    
+    
+    
+    # create database, and install WordPress
+    #wp db create --allow-root
+    wp core install --url="http://${domainname}" --title="$sitename" --admin_user="$WPUSER" --admin_password="$WPPASSW" --admin_email="user@example.org" --allow-root
+    
+    wp user update $WPUSER --user_email=${WPMAIL} --allow-root
+    
+    # discourage search engines
+    wp option update blog_public 0 --allow-root
+    
+    # discourage search engines
+    wp option update posts_per_page 6 --allow-root
+    
+    # delete sample page, and create homepage
+    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="sample-page" --field=ID --format=ids --allow-root ) --allow-root
+    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="pagina-di-esempio" --field=ID --format=ids --allow-root ) --allow-root
+    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="hello-world" --field=ID --format=ids --allow-root ) --allow-root
+    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="ciao-mondo" --field=ID --format=ids --allow-root ) --allow-root
+    wp post create --post_type=page --post_title=Home --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --format=ids --allow-root) --allow-root
+    wp post create --post_type=page --post_title=News --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --format=ids --allow-root) --allow-root
+    
+    # set homepage as front page
+    wp option update show_on_front 'page' --allow-root
+    
+    
+    # set homepage to be the new page
+    wp option update page_on_front $(wp post list --post_type=page --post_status=publish --posts_per_page=1 --pagename=Home --field=ID --format=ids --allow-root) --allow-root
+    wp option update page_for_posts $(wp post list --post_type=page --post_status=publish --posts_per_page=1 --pagename=News --field=ID --format=ids --allow-root) --allow-root
+    # create all of the pages
+    export IFS=","
+    for page in $allpages; do
+        if [ "$page" != "Home" ] && [ "$page" != "News" ] ; then
+    	    wp post create --post_type=page --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --format=ids --allow-root) --post_title="$(echo $page | sed -e 's/^ *//' -e 's/ *$//')" --allow-root
+        fi
+    done
+    
+    # set pretty urls
+    wp rewrite structure '/%postname%/' --hard --allow-root
+    wp rewrite flush --hard --allow-root
+    
+
+    
+    
+    
+    # delete akismet and hello dolly
+    wp plugin delete akismet --allow-root
+    wp plugin delete hello --allow-root
+    
+    # install antispam plugin
+    wp plugin install zero-spam --activate --allow-root
+    wp plugin install wp-example-content --activate --allow-root
+    wp plugin install codepress-admin-columns --allow-root
+    wp plugin install advanced-custom-fields-font-awesome --activate --allow-root
+    wp plugin install font-awesome-wp --activate --allow-root
+    #wp plugin install formidable --activate --allow-root
+    
+    wp plugin install regenerate-thumbnails --activate --allow-root
+    wp plugin install rewrite-rules-inspector --activate --allow-root
+    wp plugin install types  --allow-root
+    wp plugin install wordpress-seo --activate --allow-root
+    wp plugin install wp-mobile-detect --allow-root
+    
+    
+    wp plugin update --all --allow-root
+    
+    # install the company starter theme, Cerulean
+    wp theme install https://github.com/studioup/cerulean/archive/master.zip --allow-root
+
+    
+    
+    clear
+    
+    # create a navigation bar
+    wp menu create primary-menu --allow-root
+    
+    # add pages to navigation
+    export IFS=" "
+    for pageid in $(wp post list --order="ASC" --orderby="date" --post_type=page --post_status=publish --posts_per_page=-1 --field=ID --format=ids --allow-root); do
+        pagename=`wp post get $pageid --field=post_title --allow-root`
+        if [ pagename != "Home" ]; then
+    	    wp menu item add-post primary-menu $pageid --allow-root
+    	fi
+    done
+    
+    # assign navigation to primary location
+    wp menu location assign primary-menu primary --allow-root
+    
+    # move and replace theme name
+    sed -i -e 's@Cerulean@'$(basename "${sitefolder}")'@g' $(wp theme path cerulean-master --allow-root)
+    THEMEPATH="$(dirname "$(wp theme path cerulean-master --dir --allow-root)")/$(basename "${sitefolder}")"
+    mv $(wp theme path cerulean-master --dir --allow-root) ${THEMEPATH}
+    
+    chown -R www-data:www-data ${sitefolder}
+    
+    wp theme activate $(basename "${sitefolder}") --allow-root
+    wp theme delete twentytwelve --allow-root
+    wp theme delete twentythirteen --allow-root
+    wp theme delete twentyfourteen --allow-root
+    wp theme delete twentyfifteen --allow-root
+    
+    cd ${THEMEPATH}
+    
+    npm install
+    bower update --allow-root
+    
+    
+    echo "================================================================="
+    echo "Installation is complete. Your username/password is listed below."
+    echo ""
+    echo "Username: $WPUSER"
+    echo "Password: $WPPASSW"
+    echo ""
+    echo "================================================================="
+    
+    
+
+fi
