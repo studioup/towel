@@ -55,11 +55,11 @@ read -e -p "Site folder: " -i "/var/www/${CLEAN}" sitefolder
 
 while true; do
     if [ -d "$sitefolder" ]; then
-        
+
         # Control will enter here if $DIRECTORY exists.
         if [ "$(ls -A $sitefolder)" ]; then
             read -e -p "*** DANGER *** ${sitefolder} exists and it's not empty, I will not delete any file but some could be overwritten, are you sure you want to proceed? (y/n): " -i "n" run
-            
+
         else
             read -e -p "*** WARNING *** ${sitefolder} exists and it's empty, it should be safe to proceed, do you agree? (y/n): " -i "y" run
         fi
@@ -95,7 +95,7 @@ while true; do
     else
         break
     fi
-    
+
 done
 
 if  grep --quiet -rl "${domainname}" /etc/nginx/sites-enabled/ ; then
@@ -190,9 +190,9 @@ else
     wp core download --locale=it_IT --allow-root
     
     # create the wp-config file with our standard setup
-    
-wp core config --dbname=${dbname} --dbuser=${dbuser} --dbpass=${dbpassw} --allow-root --extra-php <<PHP 
-define( 'WP_DEBUG', true );
+
+wp core config --dbname=${dbname} --dbuser=${dbuser} --dbpass=${dbpassw} --allow-root --extra-php <<PHP
+define( 'WP_DEBUG', false );
 define( 'DISALLOW_FILE_EDIT', true );
 define('WP_HOME','http://${domainname}/');
 define('WP_SITEURL','http://${domainname}');
@@ -217,25 +217,45 @@ PHP
     wp option update posts_per_page 6 --allow-root
     
     # delete sample page, and create homepage
-    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="sample-page" --field=ID --format=ids --allow-root ) --allow-root
-    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="pagina-di-esempio" --field=ID --format=ids --allow-root ) --allow-root
-    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="hello-world" --field=ID --format=ids --allow-root ) --allow-root
-    wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="ciao-mondo" --field=ID --format=ids --allow-root ) --allow-root
-    wp post create --post_type=page --post_title=Home --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --format=ids --allow-root) --allow-root
-    wp post create --post_type=page --post_title=News --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --format=ids --allow-root) --allow-root
-    
-    # set homepage as front page
-    wp option update show_on_front 'page' --allow-root
-    
-    
-    # set homepage to be the new page
-    wp option update page_on_front $(wp post list --post_type=page --post_status=publish --posts_per_page=1 --pagename=Home --field=ID --format=ids --allow-root) --allow-root
-    wp option update page_for_posts $(wp post list --post_type=page --post_status=publish --posts_per_page=1 --pagename=News --field=ID --format=ids --allow-root) --allow-root
+    for pageid in $(wp post list --order="ASC" --orderby="date" --post_type=page,post --post_status=publish --posts_per_page=-1 --field=ID  --allow-root); do
+        pagename=`wp post get $pageid --field=post_title --allow-root`
+        if [ pagename != "Home" ]; then
+            wp post delete $pageid --allow-root
+        fi
+    done
+    #wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="sample-page" --field=ID  --allow-root ) --allow-root
+    #wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="pagina-di-esempio" --field=ID  --allow-root ) --allow-root
+    #wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="hello-world" --field=ID  --allow-root ) --allow-root
+    #wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --pagename="ciao-mondo" --field=ID  --allow-root ) --allow-root
+    #wp post create --post_type=page --post_title=Home --post_status=publish --post_author=$(wp user get $WPUSER --field=ID  --allow-root) --allow-root
+    #wp post create --post_type=page --post_title=News --post_status=publish --post_author=$(wp user get $WPUSER --field=ID  --allow-root) --allow-root
+
+
+
+
+
+
     # create all of the pages
     export IFS=","
     for page in $allpages; do
-        if [ "$page" != "Home" ] && [ "$page" != "News" ] ; then
-    	    wp post create --post_type=page --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --format=ids --allow-root) --post_title="$(echo $page | sed -e 's/^ *//' -e 's/ *$//')" --allow-root
+        #if [ "$page" != "Home" ] && [ "$page" != "News" ] ; then
+            wp post create --post_type=page --post_status=publish --post_author=$(wp user get $WPUSER --field=ID --allow-root) --post_title="$(echo $page | sed -e 's/^ *//' -e 's/ *$//')" --allow-root
+        #fi
+    done
+
+    # set homepage as front page
+    wp option update show_on_front 'page' --allow-root
+    wp option update default_comment_status '' --allow-root
+    
+    
+    # set homepage to be the new page
+    for pageid in $(wp post list --order="ASC" --orderby="date" --post_type=page,post --post_status=publish --posts_per_page=-1 --field=ID  --allow-root); do
+        pagename=`wp post get $pageid --field=post_title --allow-root`
+        if [ pagename == "Home" ]; then
+            wp option update page_on_front $pageid --allow-root
+        fi
+        if [ pagename == "News" ]; then
+            wp option update page_for_posts $pageid --allow-root
         fi
     done
     
@@ -252,7 +272,7 @@ PHP
     wp plugin delete hello --allow-root
     
     # install antispam plugin
-    wp plugin install zero-spam --activate --allow-root
+    wp plugin install zero-spam --allow-root
     wp plugin install wp-example-content --activate --allow-root
     wp plugin install codepress-admin-columns --allow-root
     wp plugin install advanced-custom-fields-font-awesome --activate --allow-root
@@ -263,8 +283,14 @@ PHP
     wp plugin install rewrite-rules-inspector --activate --allow-root
     wp plugin install types  --allow-root
     wp plugin install wordpress-seo --activate --allow-root
+    wp plugin install wp-security-scan --activate --allow-root
     wp plugin install wp-mobile-detect --allow-root
     
+    
+    wp option update wps_plugin_settings '{"fix_hideWpVersion":{"name":"fix_hideWpVersion","value":1,"desc":"Hide WordPress version for all users but administrators"},"fix_removeWpMetaGeneratorsFrontend":{"name":"fix_removeWpMetaGeneratorsFrontend","value":1,"desc":"Remove various meta tags generators from the blog head tag for non-administrators"},"fix_removeReallySimpleDiscovery":{"name":"fix_removeReallySimpleDiscovery","value":1,"desc":"Remove Really Simple Discovery meta tags from front-end"},"fix_removeWindowsLiveWriter":{"name":"fix_removeWindowsLiveWriter","value":1,"desc":"Remove Windows Live Writer meta tags from front-end"},"fix_disableErrorReporting":{"name":"fix_disableErrorReporting","value":1,"desc":"Disable error reporting for all but administrators"},"fix_removeCoreUpdateNotification":{"name":"fix_removeCoreUpdateNotification","value":1,"desc":"Remove core update notifications from back-end for all but administrators"},"fix_removePluginUpdateNotifications":{"name":"fix_removePluginUpdateNotifications","value":0,"desc":"Remove plug-ins update notifications from back-end"},"fix_removeThemeUpdateNotifications":{"name":"fix_removeThemeUpdateNotifications","value":0,"desc":"Remove themes update notifications from back-end"},"fix_removeLoginErrorNotificationsFrontEnd":{"name":"fix_removeLoginErrorNotificationsFrontEnd","value":0,"desc":"Remove login error notifications from front-end"},"fix_hideAdminNotifications":{"name":"fix_hideAdminNotifications","value":1,"desc":"Hide admin notifications for non admins"},"fix_preventDirectoryListing":{"name":"fix_preventDirectoryListing","value":1,"desc":"Try to create the index.php file in the wp-content, wp-content\/plugins, wp-content\/themes and wp-content\/uploads directories to prevent directory listing"},"fix_removeWpVersionFromLinks":{"name":"fix_removeWpVersionFromLinks","value":1,"desc":"Remove the version parameter from urls"},"fix_emptyReadmeFileFromRoot":{"name":"fix_emptyReadmeFileFromRoot","value":1,"desc":"Empty the content of the readme.html file from the root directory"}}' --format=json --allow-root
+    
+    wp option update wps_plugin_wp_scan '{"SCAN_STATE":2,"SCAN_PROGRESS":0,"SCAN_RESULT":2,"SCAN_TYPE":0,"SCAN_ID":0}' --format=json --allow-root
+    wp option update WSD-RSS-WGT-DISPLAY 'no' --allow-root
     
     wp plugin update --all --allow-root
     
@@ -280,11 +306,11 @@ PHP
     
     # add pages to navigation
     export IFS=" "
-    for pageid in $(wp post list --order="ASC" --orderby="date" --post_type=page --post_status=publish --posts_per_page=-1 --field=ID --format=ids --allow-root); do
+    for pageid in $(wp post list --order="ASC" --orderby="date" --post_type=page --post_status=publish --posts_per_page=-1 --field=ID  --allow-root); do
         pagename=`wp post get $pageid --field=post_title --allow-root`
         if [ pagename != "Home" ]; then
-    	    wp menu item add-post primary-menu $pageid --allow-root
-    	fi
+            wp menu item add-post primary-menu $pageid --allow-root
+        fi
     done
     
     # assign navigation to primary location
@@ -293,10 +319,21 @@ PHP
     # move and replace theme name
     sed -i -e 's@Cerulean@'$(basename "${sitefolder}")'@g' $(wp theme path cerulean-master --allow-root)
     THEMEPATH="$(dirname "$(wp theme path cerulean-master --dir --allow-root)")/$(basename "${sitefolder}")"
+    THEMEURL="http://${domainname}/wp-content/themes/$(basename "${sitefolder}")"
     mv $(wp theme path cerulean-master --dir --allow-root) ${THEMEPATH}
+    sed -i -e 's@http://static.studioup.it/img/logo_fb.png@http://'$(printf "${domainname}")'@g' ${THEMEPATH}/Gruntfile.js
+    sed -i -e 's@themeUrl = grunt.option( "themeUrl" );@themeUrl = grunt.option( "themeUrl" ) || "'$(printf "${THEMEURL}")'";@g' ${THEMEPATH}/Gruntfile.js
+    ln -s ${THEMEPATH} ${sitefolder}/theme
+
+    #find wp-content/ -type d -exec chmod 775 {} \;
+    find . -type d -exec chmod 755 {} \;
+    find . -type f -exec chmod 644 {} \;
     
+    #sudo chmod 775 wp-content/uploads/
+    chmod 640 wp-config.php
+    chown root:www-data wp-config.php
     chown -R www-data:www-data ${sitefolder}
-    
+    chown -R www-data:www-data wp-content/uploads/
     wp theme activate $(basename "${sitefolder}") --allow-root
     wp theme delete twentytwelve --allow-root
     wp theme delete twentythirteen --allow-root
